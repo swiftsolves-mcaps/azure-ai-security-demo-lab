@@ -1,16 +1,38 @@
 #!/bin/bash
 set -e  # Exit immediately if any command fails
 
+# Convert script to Unix format in case of CRLF issues
+sed -i 's/\r$//' "$0"
+
 # Clone the repository
 git clone https://github.com/Azure-Samples/azure-search-openai-javascript
 cd azure-search-openai-javascript
 
-# Ensure NVM is sourced (Cloud Shell includes NVM)
-export NVM_DIR="$HOME/.nvm"
-source ~/.nvm/nvm.sh
-source ~/.bashrc
+# Ensure `azd` is initialized
+if ! azd env list | grep -q "aisec"; then
+    echo "Initializing azd project..."
+    azd init -e aisec
+fi
 
-# Install & use Node.js 22 (Cloud Shell may have an older version)
+# Ensure NVM is installed and sourced correctly
+export NVM_DIR="$HOME/.nvm"
+
+if [ -s "$NVM_DIR/nvm.sh" ]; then
+    source "$NVM_DIR/nvm.sh"
+else
+    echo "NVM not found, installing..."
+    curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.5/install.sh | bash
+    source "$HOME/.bashrc"
+    source "$NVM_DIR/nvm.sh"
+fi
+
+# Verify if NVM is available after sourcing
+if ! command -v nvm &> /dev/null; then
+    echo "Error: NVM is still not available. Exiting."
+    exit 1
+fi
+
+# Install & use Node.js 22
 echo "Installing Node.js 22..."
 nvm install 22
 nvm use 22
@@ -26,12 +48,13 @@ azd up -e aisec --no-prompt
 echo "Base deployment complete!"
 
 #####
-#Enable Security Components
-######
+# Enable Security Components
+#####
 
-# Load environment variables from azd
+# Load environment variables safely
 echo "Fetching environment values..."
-eval $(azd env get-values --format env)
+azd env get-values > env_vars.sh
+source env_vars.sh
 
 echo "Applying security configurations for environment: $AZURE_ENV_NAME"
 
@@ -55,14 +78,6 @@ az openai deployment update \
     --account-name "$AZURE_OPENAI_SERVICE" \
     --deployment-name "$AZURE_OPENAI_CHATGPT_DEPLOYMENT" \
     --moderation-level "High"
-
-# Enable App Service Authentication for Static Web App
-#echo "Enabling App Service Authentication for Static Web App"
-#az webapp auth update \
-#    --name "$WEBAPP_URI" \
-#    --resource-group "$AZURE_RESOURCE_GROUP" \
-#    --enabled true \
-#    --action "LogInWithAzureActiveDirectory"
 
 echo "Security configurations successfully applied!"
 
