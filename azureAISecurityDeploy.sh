@@ -1,23 +1,31 @@
-#Prereqs
+#!/bin/bash
+set -e  # Exit immediately if any command fails
 
+# Clone the repository
 git clone https://github.com/Azure-Samples/azure-search-openai-javascript
 cd azure-search-openai-javascript
 
-#If In CloudShell, upgrade NPM & Node for Web App
+# Ensure NVM is sourced (Cloud Shell includes NVM)
+export NVM_DIR="$HOME/.nvm"
+source ~/.nvm/nvm.sh
+source ~/.bashrc
 
-curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.5/install.sh | bash
-
-source ~/.bashrc 
-
+# Install & use Node.js 22 (Cloud Shell may have an older version)
+echo "Installing Node.js 22..."
 nvm install 22
 nvm use 22
 
-#Initialize https://github.com/Azure-Samples/azure-search-openai-javascript?tab=readme-ov-file#deploying-from-scratch
+# Verify installation
+echo "Node.js version: $(node -v)"
+echo "NPM version: $(npm -v)"
 
-#This AZD up takes on average 20-25 minutes
+# Deploy (this takes ~20-25 minutes)
+echo "Starting Azure deployment..."
 azd up -e aisec --no-prompt
 
-#Web App URI
+# Fetch Web App URI
+echo "Deployment complete. Fetching Web App URI..."
 azd env get-values | grep WEBAPP_URI
 
-# Note: to cleanup this environment later ``azd down --force --purge``
+# Cleanup instruction
+echo "To clean up the environment later, run: azd down --force --purge"
