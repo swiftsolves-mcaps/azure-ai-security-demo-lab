@@ -29,3 +29,23 @@ azd env get-values | grep WEBAPP_URI
 
 # Cleanup instruction
 echo "To clean up the environment later, run: azd down --force --purge"
+
+# Enable Defender for Cloud
+#az security pricing create --name "Microsoft.DefenderForCloud" --tier "Standard"
+
+# Enable Private Link for OpenAI, AI Search, and Storage
+#az network private-endpoint create --name "openai-pe" --resource-group "myResourceGroup" --subnet "mySubnet" --private-connection-resource-id "/subscriptions/{subId}/resourceGroups/{rgName}/providers/Microsoft.CognitiveServices/accounts/{openaiAccountName}" --group-id "account"
+
+# Restrict Blob Storage Public Access
+#az storage account update --name mystorageaccount --resource-group myResourceGroup --public-network-access Disabled
+
+# Configure Key Vault with Access Policies
+#az keyvault create --name "myKeyVault" --resource-group "myResourceGroup"
+#az keyvault set-policy --name "myKeyVault" --object-id $(az ad signed-in-user show --query objectId -o tsv) --secret-permissions get list
+
+# Enable Defender for Storage
+#az security setting update --name "DefenderForStorage" --value "Enabled"
+
+# Configure AI Content Moderation
+#az openai deployment update --resource-group myResourceGroup --account-name myOpenAI --deployment-name myModel --moderation-level "High"
+
