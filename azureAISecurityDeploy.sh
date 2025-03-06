@@ -23,29 +23,52 @@ echo "NPM version: $(npm -v)"
 echo "Starting Azure deployment..."
 azd up -e aisec --no-prompt
 
+echo "Base deployment complete!"
+
+#####
+#Enable Security Components
+######
+
+# Load environment variables from azd
+echo "Fetching environment values..."
+eval $(azd env get-values --format env)
+
+echo "Applying security configurations for environment: $AZURE_ENV_NAME"
+
+# Enable Microsoft Defender for AI (specific to OpenAI resource)
+echo "Enabling Defender for AI on OpenAI Service: $AZURE_OPENAI_SERVICE"
+az security workspace-setting create \
+    --name "$AZURE_OPENAI_SERVICE" \
+    --target-workspace "/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_OPENAI_RESOURCE_GROUP/providers/Microsoft.OperationalInsights/workspaces/$AZURE_OPENAI_SERVICE-workspace"
+
+# Enable Defender for Storage (only for the storage account)
+echo "Enabling Defender for Storage on Storage Account: $AZURE_STORAGE_ACCOUNT"
+az security setting update \
+    --name "DefenderForStorage" \
+    --resource-group "$AZURE_STORAGE_RESOURCE_GROUP" \
+    --value "Enabled"
+
+# Enable Azure AI Content Moderation (ensure OpenAI does not output harmful content)
+echo "Enabling Azure AI Content Safety for OpenAI Service: $AZURE_OPENAI_SERVICE"
+az openai deployment update \
+    --resource-group "$AZURE_OPENAI_RESOURCE_GROUP" \
+    --account-name "$AZURE_OPENAI_SERVICE" \
+    --deployment-name "$AZURE_OPENAI_CHATGPT_DEPLOYMENT" \
+    --moderation-level "High"
+
+# Enable App Service Authentication for Static Web App
+#echo "Enabling App Service Authentication for Static Web App"
+#az webapp auth update \
+#    --name "$WEBAPP_URI" \
+#    --resource-group "$AZURE_RESOURCE_GROUP" \
+#    --enabled true \
+#    --action "LogInWithAzureActiveDirectory"
+
+echo "Security configurations successfully applied!"
+
 # Fetch Web App URI
 echo "Deployment complete. Fetching Web App URI..."
 azd env get-values | grep WEBAPP_URI
 
 # Cleanup instruction
-echo "To clean up the environment later, run: azd down --force --purge"
-
-# Enable Defender for Cloud
-#az security pricing create --name "Microsoft.DefenderForCloud" --tier "Standard"
-
-# Enable Private Link for OpenAI, AI Search, and Storage
-#az network private-endpoint create --name "openai-pe" --resource-group "myResourceGroup" --subnet "mySubnet" --private-connection-resource-id "/subscriptions/{subId}/resourceGroups/{rgName}/providers/Microsoft.CognitiveServices/accounts/{openaiAccountName}" --group-id "account"
-
-# Restrict Blob Storage Public Access
-#az storage account update --name mystorageaccount --resource-group myResourceGroup --public-network-access Disabled
-
-# Configure Key Vault with Access Policies
-#az keyvault create --name "myKeyVault" --resource-group "myResourceGroup"
-#az keyvault set-policy --name "myKeyVault" --object-id $(az ad signed-in-user show --query objectId -o tsv) --secret-permissions get list
-
-# Enable Defender for Storage
-#az security setting update --name "DefenderForStorage" --value "Enabled"
-
-# Configure AI Content Moderation
-#az openai deployment update --resource-group myResourceGroup --account-name myOpenAI --deployment-name myModel --moderation-level "High"
-
+echo "To clean up the environment later, please run the cleanup script: cleanup.sh"
