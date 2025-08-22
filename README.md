@@ -33,7 +33,9 @@ Replace `<RESOURCE_GROUP_NAME>` with the name of your deployed resource group.
 
 The following security features are enabled by this deployment:
 
-- [ ] AI Content Safety (**TODO:** Integrate Azure AI Content Safety in application code. See https://learn.microsoft.com/en-us/azure/ai-services/content-safety/overview)
+- [ ] AI Content Safety (**TODO:** Integrate Azure AI Content Safety in application code. [Learn more](https://learn.microsoft.com/en-us/azure/ai-services/content-safety/overview))
+- [ ] Container Registry Image Vulnerability Assessments (**TODO:** Integrate image vulnerability scanning for Azure Container Registry)
+- [ ] Threat Protection & Security Posture (**TODO:** Integrate data-aware threat protection and security posture features. [See details](https://learn.microsoft.com/en-us/azure/defender-for-cloud/data-aware-security-dashboard-overview))
 - [x] Microsoft Defender for AI
 - [x] Microsoft Defender for Storage
 
