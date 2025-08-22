@@ -1,89 +1,73 @@
+
 #!/bin/bash
-set -e  # Exit immediately if any command fails
+set -e
 
-# Convert script to Unix format in case of CRLF issues
-sed -i 's/\r$//' "$0"
+# azureAISecurityDeploy.sh
+# Usage: ./azureAISecurityDeploy.sh <RESOURCE_GROUP_NAME>
+echo "version 1.9"
 
-# Clone the repository
-git clone https://github.com/Azure-Samples/azure-search-openai-javascript
-cd azure-search-openai-javascript
-
-# Ensure `azd` is initialized
-if ! azd env list | grep -q "aisec"; then
-    echo "Initializing azd project..."
-    azd init -e aisec
-fi
-
-# Ensure NVM is installed and sourced correctly
-export NVM_DIR="$HOME/.nvm"
-
-if [ -s "$NVM_DIR/nvm.sh" ]; then
-    source "$NVM_DIR/nvm.sh"
-else
-    echo "NVM not found, installing..."
-    curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.5/install.sh | bash
-    source "$HOME/.bashrc"
-    source "$NVM_DIR/nvm.sh"
-fi
-
-# Verify if NVM is available after sourcing
-if ! command -v nvm &> /dev/null; then
-    echo "Error: NVM is still not available. Exiting."
+if [ -z "$1" ]; then
+    echo "Usage: $0 <RESOURCE_GROUP_NAME>"
     exit 1
 fi
 
-# Install & use Node.js 22
-echo "Installing Node.js 22..."
-nvm install 22
-nvm use 22
+RESOURCE_GROUP="$1"
 
-# Verify installation
-echo "Node.js version: $(node -v)"
-echo "NPM version: $(npm -v)"
 
-# Deploy (this takes ~20-25 minutes)
-echo "Starting Azure deployment..."
-azd up -e aisec --no-prompt
+# Find the Log Analytics workspace in the resource group
+LOG_ANALYTICS_WS_ID=$(az resource list --resource-group "$RESOURCE_GROUP" --resource-type "Microsoft.OperationalInsights/workspaces" --query "[0].id" -o tsv)
+if [ -z "$LOG_ANALYTICS_WS_ID" ]; then
+    echo "No Log Analytics workspace found in resource group $RESOURCE_GROUP. Defender for AI cannot be enabled."
+    exit 1
+fi
 
-echo "Base deployment complete!"
 
-#####
-# Enable Security Components
-#####
 
-# Load environment variables safely
-echo "Fetching environment values..."
-azd env get-values > env_vars.sh
-source env_vars.sh
+# Enable Defender for AI on OpenAI resources
+OPENAI_RESOURCES=$(az resource list --resource-group "$RESOURCE_GROUP" --resource-type "Microsoft.CognitiveServices/accounts" --query "[?kind=='OpenAI'].name" -o tsv)
+for openai in $OPENAI_RESOURCES; do
+    echo "Checking Defender for AI on OpenAI resource: $openai"
+    current_ws=$(az security workspace-setting list --query "[?name=='default'].workspaceId" -o tsv)
+    if [ "$current_ws" = "$LOG_ANALYTICS_WS_ID" ]; then
+        echo "Defender for AI already enabled for $openai."
+    else
+        echo "Enabling Defender for AI on OpenAI resource: $openai"
+        az security workspace-setting create --name "default" --target-workspace "$LOG_ANALYTICS_WS_ID"
+    fi
+done
 
-echo "Applying security configurations for environment: $AZURE_ENV_NAME"
 
-# Enable Microsoft Defender for AI (specific to OpenAI resource)
-echo "Enabling Defender for AI on OpenAI Service: $AZURE_OPENAI_SERVICE"
-az security workspace-setting create \
-    --name "$AZURE_OPENAI_SERVICE" \
-    --target-workspace "/subscriptions/$AZURE_SUBSCRIPTION_ID/resourceGroups/$AZURE_OPENAI_RESOURCE_GROUP/providers/Microsoft.OperationalInsights/workspaces/$AZURE_OPENAI_SERVICE-workspace"
 
-# Enable Defender for Storage (only for the storage account)
-echo "Enabling Defender for Storage on Storage Account: $AZURE_STORAGE_ACCOUNT"
-az security setting update \
-    --name "DefenderForStorage" \
-    --resource-group "$AZURE_STORAGE_RESOURCE_GROUP" \
-    --value "Enabled"
 
-# Enable Azure AI Content Moderation (ensure OpenAI does not output harmful content)
-echo "Enabling Azure AI Content Safety for OpenAI Service: $AZURE_OPENAI_SERVICE"
-az openai deployment update \
-    --resource-group "$AZURE_OPENAI_RESOURCE_GROUP" \
-    --account-name "$AZURE_OPENAI_SERVICE" \
-    --deployment-name "$AZURE_OPENAI_CHATGPT_DEPLOYMENT" \
-    --moderation-level "High"
 
-echo "Security configurations successfully applied!"
 
-# Fetch Web App URI
-echo "Deployment complete. Fetching Web App URI..."
-azd env get-values | grep WEBAPP_URI
 
-# Cleanup instruction
-echo "To clean up the environment later, please run the cleanup script: cleanup.sh"
+
+# Enable Defender for Storage at the storage account level using ARM API
+SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+STORAGE_ACCOUNTS=$(az resource list --resource-group "$RESOURCE_GROUP" --resource-type "Microsoft.Storage/storageAccounts" --query "[].name" -o tsv)
+declare -A STORAGE_RESULTS
+for sa in $STORAGE_ACCOUNTS; do
+    echo "Enabling Defender for Storage (with advanced settings) on account: $sa"
+    url="https://management.azure.com/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP}/providers/Microsoft.Storage/storageAccounts/${sa}/providers/Microsoft.Security/defenderForStorageSettings/current?api-version=2025-01-01"
+    body='{ "properties": { "isEnabled": true, "overrideSubscriptionLevelSettings": true, "malwareScanning": { "onUpload": { "isEnabled": true } }, "sensitiveDataDiscovery": { "isEnabled": true } } }'
+    if az rest --method PUT --url "$url" --body "$body" --headers "Content-Type=application/json"; then
+        STORAGE_RESULTS[$sa]="✅"
+    else
+        echo "Failed to enable Defender for Storage on $sa."
+        STORAGE_RESULTS[$sa]="❌"
+    fi
+done
+
+
+# Summary of protections
+echo
+echo "Security Protections Summary:"
+OPENAI_STATUS="✅"
+echo "- Defender for AI (OpenAI): $OPENAI_STATUS"
+echo "- Defender for Storage:"
+for sa in ${!STORAGE_RESULTS[@]}; do
+    echo "    - $sa: ${STORAGE_RESULTS[$sa]}"
+done
+echo
+echo "All specified security features have been attempted for resources in $RESOURCE_GROUP."

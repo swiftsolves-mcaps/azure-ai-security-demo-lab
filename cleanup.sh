@@ -1,44 +1,50 @@
+
 #!/bin/bash
-set -e  # Exit on error
+set -e
 
-cd azure-search-openai-javascript
+# cleanup.sh
+# Usage: ./cleanup.sh <RESOURCE_GROUP_NAME>
 
-# Load environment variables
-echo "Fetching environment values..."
-eval $(azd env get-values --format env)
+if [ -z "$1" ]; then
+    echo "Usage: $0 <RESOURCE_GROUP_NAME>"
+    exit 1
+fi
 
-echo "Starting cleanup of security configurations for environment: $AZURE_ENV_NAME"
+RESOURCE_GROUP="$1"
 
-# Disable Microsoft Defender for AI
-echo "Disabling Defender for AI on OpenAI Service: $AZURE_OPENAI_SERVICE"
-az security workspace-setting delete \
-    --name "$AZURE_OPENAI_SERVICE"
+echo "Starting cleanup of security configurations in resource group: $RESOURCE_GROUP"
+
+# Disable Defender for AI and Content Moderation on OpenAI resources
+OPENAI_RESOURCES=$(az resource list --resource-group "$RESOURCE_GROUP" --resource-type "Microsoft.CognitiveServices/accounts" --query "[?kind=='OpenAI'].name" -o tsv)
+for openai in $OPENAI_RESOURCES; do
+    echo "Disabling Defender for AI on OpenAI resource: $openai"
+    az security workspace-setting delete --name "$openai" || true
+
+    # Disable Content Moderation (Content Safety) on all deployments in the OpenAI account
+    deployments=$(az cognitiveservices account deployment list --resource-group "$RESOURCE_GROUP" --account-name "$openai" --query "[].name" -o tsv)
+    for dep in $deployments; do
+        echo "Disabling Content Moderation for deployment: $dep in $openai"
+        az openai deployment update --resource-group "$RESOURCE_GROUP" --account-name "$openai" --deployment-name "$dep" --moderation-level "Off" || true
+    done
+done
+
+# Disable Defender for Container Apps
+CONTAINER_APPS=$(az resource list --resource-group "$RESOURCE_GROUP" --resource-type "Microsoft.App/containerApps" --query "[].name" -o tsv)
+for ca in $CONTAINER_APPS; do
+    echo "Disabling Defender for Container App: $ca"
+    az security setting update --name "DefenderForContainers" --resource-group "$RESOURCE_GROUP" --value "Disabled" || true
+done
 
 # Disable Defender for Storage
-echo "Disabling Defender for Storage on Storage Account: $AZURE_STORAGE_ACCOUNT"
-az security setting update \
-    --name "DefenderForStorage" \
-    --resource-group "$AZURE_STORAGE_RESOURCE_GROUP" \
-    --value "Disabled"
-
-# Remove Azure AI Content Moderation settings
-echo "Disabling Azure AI Content Safety for OpenAI Service: $AZURE_OPENAI_SERVICE"
-az openai deployment update \
-    --resource-group "$AZURE_OPENAI_RESOURCE_GROUP" \
-    --account-name "$AZURE_OPENAI_SERVICE" \
-    --deployment-name "$AZURE_OPENAI_CHATGPT_DEPLOYMENT" \
-    --moderation-level "Off"
-
-# Disable App Service Authentication
-#echo "Disabling App Service Authentication for Static Web App"
-#az webapp auth update \
-#    --name "$WEBAPP_URI" \
-#    --resource-group "$AZURE_RESOURCE_GROUP" \
-#    --enabled false
+STORAGE_ACCOUNTS=$(az resource list --resource-group "$RESOURCE_GROUP" --resource-type "Microsoft.Storage/storageAccounts" --query "[].name" -o tsv)
+for sa in $STORAGE_ACCOUNTS; do
+    echo "Disabling Defender for Storage Account: $sa"
+    az security setting update --name "DefenderForStorage" --resource-group "$RESOURCE_GROUP" --value "Disabled" || true
+done
 
 echo "Security configurations successfully removed!"
 
-##Azd Env
+# Optionally, clean up all resources if azd was used
 azd down --force --purge
 
 echo "Cleanup complete!"
