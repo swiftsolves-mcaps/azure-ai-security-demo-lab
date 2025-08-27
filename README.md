@@ -5,7 +5,7 @@
 > [!WARNING]  
 > This repo is still under development, and has not yet reached v1.0 release.
 
-This repo provides a script to enable security features on Azure OpenAI resources after you deploy the sample environment.
+This repo provides automation to deploy AI Workloads on Azure using Azure OpenAI, and other supporting resources, to demonstrated the end-to-end security story of AI Security on Azure.
 
 ## Instructions
 
@@ -31,16 +31,16 @@ Replace `<RESOURCE_GROUP_NAME>` with the name of your deployed resource group.
 
 4. The script will find all Azure OpenAI resources in the specified resource group and enable Microsoft Defender for Cloud on them.
 
+## To-Do List
 
-## Security Features Enabled
-
-The following security features are enabled by this deployment:
-
-- [ ] AI Content Safety (**TODO:** Integrate Azure AI Content Safety in application code. [Learn more](https://learn.microsoft.com/en-us/azure/ai-services/content-safety/overview))
-- [ ] Container Registry Image Vulnerability Assessments (**TODO:** Integrate image vulnerability scanning for Azure Container Registry)
-- [ ] Threat Protection & Security Posture (**TODO:** Integrate data-aware threat protection and security posture features. [See details](https://learn.microsoft.com/en-us/azure/defender-for-cloud/data-aware-security-dashboard-overview))
 - [x] Microsoft Defender for AI
 - [x] Microsoft Defender for Storage
+- [ ] Integrate [image vulnerability scanning](https://learn.microsoft.com/en-us/troubleshoot/azure/azure-container-registry/image-vulnerability-assessment) for Azure Container Registry
+- [ ] Integrate data-aware threat protection and security posture [features](https://learn.microsoft.com/en-us/azure/defender-for-cloud/data-aware-security-dashboard-overview)
+- [ ] Add APIM for with [Defender for APIs](https://learn.microsoft.com/en-us/azure/defender-for-cloud/defender-for-apis-introduction).
+- [ ] Build SQL Data Source and enable [Defender for SQL](https://learn.microsoft.com/en-us/azure/azure-sql/database/azure-defender-for-sql?view=azuresql)
+- [ ] Deploy Microsoft Purview for Data Classification, and DLP.
+- [ ] Integrate Azure AI Content Safety [in application code](https://learn.microsoft.com/en-us/azure/ai-services/content-safety/overview).
 
 > **Note:** If you want to enable additional security features, you can extend the script to include more Azure security controls as needed.
 
