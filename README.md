@@ -2,6 +2,9 @@
 
 ## Overview
 
+! > [!WARNING]  
+> This repo is still under development, and has not yet reached v1.0 release.
+
 This repo provides a script to enable security features on Azure OpenAI resources after you deploy the sample environment.
 
 ## Instructions
