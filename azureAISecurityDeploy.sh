@@ -225,7 +225,7 @@ if [ -f "$TEMPLATE_PATH" ]; then
             ENDPOINT_HOST=$(az deployment group create \
               -g "$RESOURCE_GROUP" -n "$DEPLOY_NAME" \
               --template-file "$TEMPLATE_PATH" \
-              --parameters profileName="$PROFILE_NAME" endpointName="$ENDPOINT_NAME" appServiceId="$APP_ID" appServiceDefaultHostname="$APP_HOST" wafPolicyName="afd-waf-$RESOURCE_GROUP" sku="$SKU" wafMode="$WAF_MODE" \
+              --parameters profileName="$PROFILE_NAME" endpointName="$ENDPOINT_NAME" appServiceDefaultHostname="$APP_HOST" wafPolicyName="afd-waf-$RESOURCE_GROUP" sku="$SKU" wafMode="$WAF_MODE" \
               --only-show-errors --query properties.outputs.endpointHostname.value -o tsv || true)
 
             if [ -n "$ENDPOINT_HOST" ]; then

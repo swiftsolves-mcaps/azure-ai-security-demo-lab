@@ -57,11 +57,7 @@ Azure OpenAI   Azure AI Search   Azure Storage
 2️⃣ Deploy the sample from a terminal in the dev container (regions are selected interactively).
 
 ```bash
-chmod +x *.sh; azd login --use-device-code
-```
-
-```bash
-./deploy-sample-and-secure.sh --env azure-ai-search-demo
+chmod +x *.sh; ./deploy-sample-and-secure.sh --env azure-ai-search-demo
 ```
 
 3️⃣ Apply security hardening (includes Front Door + WAF by default)
@@ -69,7 +65,6 @@ chmod +x *.sh; azd login --use-device-code
 ```bash
 ./azureAISecurityDeploy.sh
  ```
-
 
 *If azd environment resource group auto-detection fails, the script will prompt for the resource group name. You can still run it explicitly with `./azureAISecurityDeploy.sh <RESOURCE_GROUP_NAME>`.*
 

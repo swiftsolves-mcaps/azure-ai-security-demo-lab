@@ -66,7 +66,11 @@ if [[ ! -f "$WORKDIR/azure.yaml" ]]; then
       echo "Workdir $WORKDIR is not empty; skipping 'azd init'." 
     else
       echo "Initializing azd template $TEMPLATE in $WORKDIR ..."
-      (cd "$WORKDIR" && azd init -t "$TEMPLATE")
+      if [[ -n "$ENV_NAME" ]]; then
+        (cd "$WORKDIR" && AZURE_ENV_NAME="$ENV_NAME" azd init -t "$TEMPLATE")
+      else
+        (cd "$WORKDIR" && azd init -t "$TEMPLATE")
+      fi
     fi
   fi
 fi

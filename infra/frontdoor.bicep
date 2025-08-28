@@ -16,8 +16,6 @@ param originGroupName string = 'app-origin-group'
 @description('Origin name (logical).')
 param originName string = 'appservice-origin'
 
-@description('Resource ID of the target App Service (Microsoft.Web/sites).')
-param appServiceId string
 
 @description('Default hostname of the App Service (e.g., myapp.azurewebsites.net). Used for host header and SNI checks.')
 param appServiceDefaultHostname string
@@ -88,10 +86,8 @@ resource origin 'Microsoft.Cdn/profiles/originGroups/origins@2024-09-01' = {
   name: originName
   parent: originGroup
   properties: {
-    azureOrigin: {
-      id: appServiceId
-    }
-    hostName: appServiceDefaultHostname
+  // For AFD Standard/Premium, specify the origin by hostname. Do not use 'azureOrigin' here.
+  hostName: appServiceDefaultHostname
   originHostHeader: appServiceDefaultHostname
     httpsPort: 443
     httpPort: 80
@@ -125,8 +121,8 @@ resource waf 'Microsoft.Network/frontdoorWebApplicationFirewallPolicies@2024-02-
   name: wafPolicyName
   location: 'Global'
   sku: {
-    // WAF SKU must match AFD SKU family
-    name: sku
+  // For AFD Standard/Premium, WAF policy SKU must be Classic_AzureFrontDoor
+  name: 'Classic_AzureFrontDoor'
   }
   properties: {
     policySettings: {
@@ -136,8 +132,8 @@ resource waf 'Microsoft.Network/frontdoorWebApplicationFirewallPolicies@2024-02-
     managedRules: {
       managedRuleSets: [
         {
-          // AFD WAF default managed rule set (OWASP)
-          ruleSetType: 'DefaultRuleSet'
+      // AFD WAF default managed rule set (OWASP)
+      ruleSetType: 'DefaultRuleSet'
           ruleSetVersion: '2.1'
         }
       ]
@@ -160,7 +156,8 @@ resource securityPolicy 'Microsoft.Cdn/profiles/securityPolicies@2024-09-01' = {
           domains: [
             // Apply to the endpoint’s default domain (e.g., <endpoint>.azurefd.net)
             {
-              id: afdEndpoint.id
+              // Default domain subresource: profiles/afdEndpoints/domains/<endpointName>
+              id: '${afdEndpoint.id}/domains/${endpointName}'
             }
           ]
           patternsToMatch: [ '/*' ]
