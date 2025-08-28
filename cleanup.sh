@@ -31,7 +31,72 @@ done
 
 echo "Security configurations successfully removed!"
 
+# Optionally revert subscription-wide Defender plan changes recorded by deploy script
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+STATE_FILE="$SCRIPT_DIR/.defender_state.env"
+YELLOW='\033[1;33m'; NC='\033[0m'
+if [ -f "$STATE_FILE" ]; then
+    # shellcheck disable=SC1090
+    source "$STATE_FILE"
+    if [ "${APPSERVICES_CHANGED:-0}" = "1" ] || [ "${COSMOSDBS_CHANGED:-0}" = "1" ]; then
+        echo -e "${YELLOW}Warning:${NC} Subscription-wide Defender plans were enabled by the deploy script."
+        read -r -p "Do you want to revert these subscription-wide changes now? [y/N] " revert
+        if [[ "$revert" =~ ^[Yy]$ ]]; then
+            if [ "${APPSERVICES_CHANGED:-0}" = "1" ]; then
+                echo "Reverting Defender plan for App Services at subscription scope..."
+                url="https://management.azure.com/subscriptions/${SUBSCRIPTION_ID}/providers/Microsoft.Security/pricings/AppServices?api-version=2024-01-01"
+                body='{ "properties": { "pricingTier": "Free" } }'
+                az rest --method PUT --url "$url" --body "$body" --headers "Content-Type=application/json" || true
+            fi
+            if [ "${COSMOSDBS_CHANGED:-0}" = "1" ]; then
+                echo "Reverting Defender plan for Cosmos DBs at subscription scope..."
+                url="https://management.azure.com/subscriptions/${SUBSCRIPTION_ID}/providers/Microsoft.Security/pricings/CosmosDbs?api-version=2024-01-01"
+                body='{ "properties": { "pricingTier": "Free" } }'
+                az rest --method PUT --url "$url" --body "$body" --headers "Content-Type=application/json" || true
+            fi
+            echo "Revert complete."
+            rm -f "$STATE_FILE" || true
+        else
+            echo "Leaving subscription-wide Defender plans as-is. You can re-run cleanup later to revert."
+        fi
+    fi
+fi
+
 # Optionally, clean up all resources if azd was used
-azd down --force --purge
+# Prefer using the azd workdir/env captured by the bootstrap to target the correct project
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+AZD_STATE_FILE="$SCRIPT_DIR/.azd_state.env"
+if [ -f "$AZD_STATE_FILE" ]; then
+    # shellcheck disable=SC1090
+    source "$AZD_STATE_FILE"
+    if [ -n "${AZD_WORKDIR:-}" ] && [ -d "$AZD_WORKDIR" ]; then
+        echo "Running 'azd down --force --purge' in $AZD_WORKDIR ..."
+        if [ -n "${AZD_ENV:-}" ]; then
+            (cd "$AZD_WORKDIR" && azd down --force --purge -e "$AZD_ENV") || true
+        else
+            (cd "$AZD_WORKDIR" && azd down --force --purge) || true
+        fi
+    else
+        echo "(Info) No recorded azd workdir found; attempting azd down in current directory."
+        azd down --force --purge || true
+    fi
+else
+    echo "(Info) No .azd_state.env present; attempting azd down in current directory."
+    azd down --force --purge || true
+fi
 
 echo "Cleanup complete!"
+
+# Optional: remove Azure Front Door profile created by the deploy script
+read -r -p "Do you want to remove the Azure Front Door profile created for this resource group? [y/N] " rm_afd
+if [[ "$rm_afd" =~ ^[Yy]$ ]]; then
+    PROFILE_NAME="fd-${RESOURCE_GROUP}"
+    ID=$(az resource show -g "$RESOURCE_GROUP" -n "$PROFILE_NAME" --resource-type Microsoft.Cdn/profiles --query id -o tsv 2>/dev/null || true)
+    if [ -z "$ID" ]; then
+        echo "Front Door profile '$PROFILE_NAME' not found in RG '$RESOURCE_GROUP'. Nothing to remove."
+    else
+        echo "Deleting Front Door profile '$PROFILE_NAME'..."
+        az resource delete --ids "$ID" --verbose --only-show-errors || true
+        echo "Front Door removal complete."
+    fi
+fi
