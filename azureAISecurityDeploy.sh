@@ -3,15 +3,36 @@
 set -e
 
 # azureAISecurityDeploy.sh
-# Usage: ./azureAISecurityDeploy.sh <RESOURCE_GROUP_NAME>
-echo "version 2.8"
+# Usage: ./azureAISecurityDeploy.sh [RESOURCE_GROUP_NAME]
+echo "version 2.9"
 
-if [ -z "$1" ]; then
-    echo "Usage: $0 <RESOURCE_GROUP_NAME>"
-    exit 1
+# Try to resolve resource group automatically if not provided
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+STATE_FILE="$SCRIPT_DIR/.azd_state.env"
+
+detect_rg() {
+    local rg=""
+    if [ -f "$STATE_FILE" ]; then
+        # shellcheck disable=SC1090
+        source "$STATE_FILE"
+        if [ -n "${AZD_WORKDIR:-}" ] && [ -d "${AZD_WORKDIR}" ]; then
+            if [ -n "${AZD_ENV:-}" ]; then
+                rg=$(cd "$AZD_WORKDIR" && azd env get-values -e "$AZD_ENV" | sed -n 's/^AZURE_RESOURCE_GROUP=//p' | tr -d '\r')
+            else
+                rg=$(cd "$AZD_WORKDIR" && azd env get-values | sed -n 's/^AZURE_RESOURCE_GROUP=//p' | tr -d '\r')
+            fi
+        fi
+    fi
+    echo "$rg"
+}
+
+RESOURCE_GROUP="${1:-}"
+if [ -z "$RESOURCE_GROUP" ]; then
+    RESOURCE_GROUP=$(detect_rg)
 fi
-
-RESOURCE_GROUP="$1"
+if [ -z "$RESOURCE_GROUP" ]; then
+    read -r -p "Enter the resource group name to secure: " RESOURCE_GROUP
+fi
 
 # Subscription ID used for subscription-scope checks and ARM calls
 SUBSCRIPTION_ID=$(az account show --query id -o tsv)
@@ -172,60 +193,48 @@ echo "- Defender plan (Cosmos DBs) at subscription: $COSMOS_MARK $COSMOS_SUB_STA
 echo
 echo "All specified security features have been attempted for resources in $RESOURCE_GROUP."
 
-# Optional: Azure Front Door + WAF (Standard/Premium) in front of App Service
-read -r -p "Do you want to deploy Azure Front Door + WAF in front of the App Service now? [y/N] " afd_ans
-if [[ "$afd_ans" =~ ^[Yy]$ ]]; then
-    # Locate Bicep template
-    TEMPLATE_PATH="$SCRIPT_DIR/infra/frontdoor.bicep"
-    if [ ! -f "$TEMPLATE_PATH" ]; then
-        echo "Front Door template not found at $TEMPLATE_PATH. Skipping." 
+# Azure Front Door + WAF (Standard) in front of App Service (default behavior)
+TEMPLATE_PATH="$SCRIPT_DIR/infra/frontdoor.bicep"
+if [ -f "$TEMPLATE_PATH" ]; then
+    echo "Configuring Azure Front Door + WAF in front of the App Service (default)..."
+    # Auto-detect App Service (exclude function apps)
+    APP_NAMES=$(az webapp list -g "$RESOURCE_GROUP" --query "[?contains(kind, 'function')==\`false\`].name" -o tsv | tr -d '\r' || true)
+    COUNT=$(echo "$APP_NAMES" | sed '/^$/d' | wc -l | tr -d ' ')
+    if [ "$COUNT" -eq 0 ]; then
+        echo "No App Service found in '$RESOURCE_GROUP'. Skipping Front Door deployment."
+    elif [ "$COUNT" -gt 1 ]; then
+        echo "Multiple App Services found in '$RESOURCE_GROUP':"; echo "$APP_NAMES" | sed '/^$/d' | nl -w2 -s') '
+        echo "Skipping Front Door deployment (requires a single App Service)."
     else
-        # Auto-detect App Service (exclude function apps)
-        echo "Discovering App Service in RG '$RESOURCE_GROUP'..."
-        APP_NAMES=$(az webapp list -g "$RESOURCE_GROUP" --query "[?contains(kind, 'function')==\`false\`].name" -o tsv | tr -d '\r' || true)
-        COUNT=$(echo "$APP_NAMES" | sed '/^$/d' | wc -l | tr -d ' ')
-        if [ "$COUNT" -eq 0 ]; then
-            echo "No App Service found in '$RESOURCE_GROUP'. Skipping Front Door deployment."
-        elif [ "$COUNT" -gt 1 ]; then
-            echo "Multiple App Services found in '$RESOURCE_GROUP':"; echo "$APP_NAMES" | sed '/^$/d' | nl -w2 -s') '
-            echo "Please rerun later with a single App Service or deploy manually using ./deploy-frontdoor.sh."
+        APP_NAME="$APP_NAMES"
+        APP_ID=$(az webapp show -g "$RESOURCE_GROUP" -n "$APP_NAME" --only-show-errors --query id -o tsv || true)
+        APP_HOST=$(az webapp show -g "$RESOURCE_GROUP" -n "$APP_NAME" --only-show-errors --query defaultHostName -o tsv || true)
+        if [ -z "$APP_ID" ] || [ -z "$APP_HOST" ]; then
+            echo "Failed to resolve App Service details. Skipping Front Door deployment."
         else
-            APP_NAME="$APP_NAMES"
-            APP_ID=$(az webapp show -g "$RESOURCE_GROUP" -n "$APP_NAME" --only-show-errors --query id -o tsv || true)
-            APP_HOST=$(az webapp show -g "$RESOURCE_GROUP" -n "$APP_NAME" --only-show-errors --query defaultHostName -o tsv || true)
-            if [ -z "$APP_ID" ] || [ -z "$APP_HOST" ]; then
-                echo "Failed to resolve App Service details. Skipping Front Door deployment."
+            PROFILE_NAME="fd-${RESOURCE_GROUP}"
+            ENDPOINT_NAME="ep-${RESOURCE_GROUP}"
+            SKU="Standard_AzureFrontDoor"
+            WAF_MODE="Prevention"
+
+            echo "Setting httpsOnly=true on App Service '$APP_NAME'..."
+            az webapp update -g "$RESOURCE_GROUP" -n "$APP_NAME" --set httpsOnly=true 1>/dev/null || true
+
+            DEPLOY_NAME="afd-waf-$(date +%Y%m%d%H%M%S)"
+            echo "Deploying Azure Front Door ($SKU) + WAF -> $APP_NAME ..."
+            ENDPOINT_HOST=$(az deployment group create \
+              -g "$RESOURCE_GROUP" -n "$DEPLOY_NAME" \
+              --template-file "$TEMPLATE_PATH" \
+              --parameters profileName="$PROFILE_NAME" endpointName="$ENDPOINT_NAME" appServiceId="$APP_ID" appServiceDefaultHostname="$APP_HOST" wafPolicyName="afd-waf-$RESOURCE_GROUP" sku="$SKU" wafMode="$WAF_MODE" \
+              --only-show-errors --query properties.outputs.endpointHostname.value -o tsv || true)
+
+            if [ -n "$ENDPOINT_HOST" ]; then
+                echo "Front Door deployed. Default endpoint: https://$ENDPOINT_HOST"
             else
-                # Defaults
-                PROFILE_NAME="fd-${RESOURCE_GROUP}"
-                ENDPOINT_NAME="ep-${RESOURCE_GROUP}"
-                SKU="Standard_AzureFrontDoor"  # or Premium_AzureFrontDoor
-                WAF_MODE="Prevention"          # or Detection
-
-                echo "Setting httpsOnly=true on App Service '$APP_NAME'..."
-                az webapp update -g "$RESOURCE_GROUP" -n "$APP_NAME" --set httpsOnly=true 1>/dev/null || true
-
-                DEPLOY_NAME="afd-waf-$(date +%Y%m%d%H%M%S)"
-                echo "What-if: Azure Front Door ($SKU) + WAF -> $APP_NAME"
-                az deployment group what-if \
-                  -g "$RESOURCE_GROUP" -n "$DEPLOY_NAME" \
-                  --template-file "$TEMPLATE_PATH" \
-                  --parameters profileName="$PROFILE_NAME" endpointName="$ENDPOINT_NAME" appServiceId="$APP_ID" appServiceDefaultHostname="$APP_HOST" wafPolicyName="afd-waf-$RESOURCE_GROUP" sku="$SKU" wafMode="$WAF_MODE" \
-                  --only-show-errors || true
-
-                echo "Deploying Azure Front Door..."
-                ENDPOINT_HOST=$(az deployment group create \
-                  -g "$RESOURCE_GROUP" -n "$DEPLOY_NAME" \
-                  --template-file "$TEMPLATE_PATH" \
-                  --parameters profileName="$PROFILE_NAME" endpointName="$ENDPOINT_NAME" appServiceId="$APP_ID" appServiceDefaultHostname="$APP_HOST" wafPolicyName="afd-waf-$RESOURCE_GROUP" sku="$SKU" wafMode="$WAF_MODE" \
-                  --only-show-errors --query properties.outputs.endpointHostname.value -o tsv || true)
-
-                if [ -n "$ENDPOINT_HOST" ]; then
-                    echo "Front Door deployed. Default endpoint: https://$ENDPOINT_HOST"
-                else
-                    echo "Front Door deployment completed, but endpoint hostname was not retrieved."
-                fi
+                echo "Front Door deployment completed, but endpoint hostname was not retrieved."
             fi
         fi
     fi
+else
+    echo "Front Door template not found at $TEMPLATE_PATH. Skipping."
 fi

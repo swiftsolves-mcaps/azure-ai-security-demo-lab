@@ -10,7 +10,7 @@ set -euo pipefail
 #     [--repo-url https://github.com/Azure-Samples/azure-search-openai-demo.git] \
 #     [--branch main] \
 #     [--workdir ./upstream/azure-search-openai-demo] \
-#     [--env <env-name>] [--location <azure-region>] [--subscription <sub-id>] [--use-devcontainer true|false|auto] [--skip-secure] [--secure true|false]
+#     [--env <env-name>] [--location <azure-region>] [--subscription <sub-id>] [--use-devcontainer true|false|auto]
 #
 # If both --template and --repo-url are omitted, defaults to --template Azure-Samples/azure-search-openai-demo.
 
@@ -22,7 +22,8 @@ ENV_NAME=""
 LOCATION=""
 SUBSCRIPTION=""
 USE_DEVCONTAINER="auto"
-RUN_SECURE=1
+# Default: do NOT run security automatically; users will run it explicitly after deploy
+RUN_SECURE=0
 TENANT_ID_MODE="auto" # 'auto' or specific tenantId
 
 while [[ $# -gt 0 ]]; do
@@ -36,8 +37,6 @@ while [[ $# -gt 0 ]]; do
   --subscription) SUBSCRIPTION="$2"; shift 2;;
   --tenant-id) TENANT_ID_MODE="$2"; shift 2;;
   --use-devcontainer) USE_DEVCONTAINER="$2"; shift 2;;
-  --skip-secure) RUN_SECURE=0; shift 1;;
-  --secure) [[ "$2" == "false" ]] && RUN_SECURE=0 || RUN_SECURE=1; shift 2;;
     -h|--help) sed -n '1,100p' "$0"; exit 0;;
     *) echo "Unknown option: $1"; exit 1;;
   esac
@@ -190,5 +189,5 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ $RUN_SECURE -eq 1 ]]; then
   "$SCRIPT_DIR/azureAISecurityDeploy.sh" "$RG"
 else
-  echo "Skipping security hardening (--skip-secure). Run: $SCRIPT_DIR/azureAISecurityDeploy.sh $RG"
+  echo "Security hardening step not executed by default. Run: $SCRIPT_DIR/azureAISecurityDeploy.sh $RG"
 fi

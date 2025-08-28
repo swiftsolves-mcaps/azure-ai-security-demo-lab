@@ -85,18 +85,15 @@ else
     azd down --force --purge || true
 fi
 
-echo "Cleanup complete!"
-
-# Optional: remove Azure Front Door profile created by the deploy script
-read -r -p "Do you want to remove the Azure Front Door profile created for this resource group? [y/N] " rm_afd
-if [[ "$rm_afd" =~ ^[Yy]$ ]]; then
-    PROFILE_NAME="fd-${RESOURCE_GROUP}"
-    ID=$(az resource show -g "$RESOURCE_GROUP" -n "$PROFILE_NAME" --resource-type Microsoft.Cdn/profiles --query id -o tsv 2>/dev/null || true)
-    if [ -z "$ID" ]; then
-        echo "Front Door profile '$PROFILE_NAME' not found in RG '$RESOURCE_GROUP'. Nothing to remove."
-    else
-        echo "Deleting Front Door profile '$PROFILE_NAME'..."
-        az resource delete --ids "$ID" --verbose --only-show-errors || true
-        echo "Front Door removal complete."
-    fi
+# Remove Azure Front Door profile created by the secure step (no prompt)
+PROFILE_NAME="fd-${RESOURCE_GROUP}"
+ID=$(az resource show -g "$RESOURCE_GROUP" -n "$PROFILE_NAME" --resource-type Microsoft.Cdn/profiles --query id -o tsv 2>/dev/null || true)
+if [ -z "$ID" ]; then
+    echo "No Front Door profile '$PROFILE_NAME' found in RG '$RESOURCE_GROUP'. Skipping."
+else
+    echo "Deleting Front Door profile '$PROFILE_NAME'..."
+    az resource delete --ids "$ID" --only-show-errors || true
+    echo "Front Door removal complete."
 fi
+
+echo "Cleanup complete!"
