@@ -1,22 +1,32 @@
 {
-  "name": "azure-ai-security-demo-lab",
-  "image": "mcr.microsoft.com/devcontainers/universal:2",
+  "name": "Azure Search OpenAI Demo",
+  "image": "mcr.microsoft.com/devcontainers/python:3.11",
   "features": {
-    "ghcr.io/devcontainers/features/azure-cli:1": {},
-    "ghcr.io/devcontainers/features/azure-dev-cli:1": {},
-    "ghcr.io/devcontainers/features/node:1": { "version": "lts" },
-    "ghcr.io/devcontainers/features/git:1": {}
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "22",
+      "nodeGypDependencies": false
+    },
+    "ghcr.io/devcontainers/features/azure-cli:1.2.5": {},
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+    "ghcr.io/azure/azure-dev/azd:latest": {}
   },
   "customizations": {
     "vscode": {
       "extensions": [
-        "ms-azuretools.vscode-azurecli",
-        "ms-azuretools.vscode-azureaccount",
+        "ms-azuretools.azure-dev",
         "ms-azuretools.vscode-bicep",
-        "ms-vscode.azure-repos"
+        "ms-python.python",
+        "esbenp.prettier-vscode",
+        "DavidAnson.vscode-markdownlint"
       ]
     }
   },
+  "forwardPorts": [
+    50505
+  ],
+  "postCreateCommand": "",
   "remoteUser": "vscode",
-  "postCreateCommand": "echo 'Dev container ready. Run VS Code task: Deploy sample + secure.'"
+  "hostRequirements": {
+    "memory": "8gb"
+  }
 }
