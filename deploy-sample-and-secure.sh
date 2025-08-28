@@ -10,7 +10,7 @@ set -euo pipefail
 #     [--repo-url https://github.com/Azure-Samples/azure-search-openai-demo.git] \
 #     [--branch main] \
 #     [--workdir ./upstream/azure-search-openai-demo] \
-#     [--env <env-name>] [--location <azure-region>] [--subscription <sub-id>] [--use-devcontainer true|false|auto]
+#     [--env <env-name>] [--subscription <sub-id>] [--use-devcontainer true|false|auto]
 #
 # If both --template and --repo-url are omitted, defaults to --template Azure-Samples/azure-search-openai-demo.
 
@@ -19,12 +19,13 @@ REPO_URL=""
 BRANCH="main"
 WORKDIR="./upstream/azure-search-openai-demo"
 ENV_NAME=""
-LOCATION=""
 SUBSCRIPTION=""
 USE_DEVCONTAINER="auto"
 # Default: do NOT run security automatically; users will run it explicitly after deploy
 RUN_SECURE=0
 TENANT_ID_MODE="auto" # 'auto' or specific tenantId
+
+echo "Version 1.4"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -32,8 +33,7 @@ while [[ $# -gt 0 ]]; do
     --repo-url) REPO_URL="$2"; TEMPLATE=""; shift 2;;
     --branch) BRANCH="$2"; shift 2;;
     --workdir) WORKDIR="$2"; shift 2;;
-    --env) ENV_NAME="$2"; shift 2;;
-    --location|-l) LOCATION="$2"; shift 2;;
+  --env) ENV_NAME="$2"; shift 2;;
   --subscription) SUBSCRIPTION="$2"; shift 2;;
   --tenant-id) TENANT_ID_MODE="$2"; shift 2;;
   --use-devcontainer) USE_DEVCONTAINER="$2"; shift 2;;
@@ -87,34 +87,41 @@ if [[ -f azure.yaml ]]; then
   fi
 fi
 
-# 2) Ensure azd environment exists (if ENV_NAME provided) so we can set vars before 'azd up'
+# 2) Sign in (if needed) and set subscription context early to avoid prompts
+if ! az account show >/dev/null 2>&1; then
+  echo "Signing into Azure (device code flow)..."
+  # First try azd login (works well in Codespaces); then ensure az CLI is also logged in
+  azd auth login || true
+  if ! az account show >/dev/null 2>&1; then
+    az login --use-device-code --allow-no-subscriptions || true
+  fi
+fi
+if [[ -n "$SUBSCRIPTION" ]]; then
+  echo "Setting active subscription to $SUBSCRIPTION ..."
+  az account set --subscription "$SUBSCRIPTION" || true
+fi
+
+# 3) Ensure azd environment exists (if ENV_NAME provided) so we can set vars before 'azd up'
 ensure_env_if_needed() {
-  local envName="$1"; local loc="$2"
+  local envName="$1"
   if [[ -n "$envName" ]]; then
-    if ! azd env list --output tsv 2>/dev/null | cut -f1 | grep -Fxq "$envName"; then
-      echo "Creating azd environment '$envName' (location: ${loc:-inherit}) ..."
-      if [[ -n "$loc" ]]; then
-        azd env new -e "$envName" -l "$loc" --no-prompt || true
-      else
-        azd env new -e "$envName" --no-prompt || true
-      fi
-    else
-      echo "(Info) azd environment '$envName' already exists."
-    fi
+    echo "Ensuring azd environment '$envName' exists and is selected..."
+    azd env select "$envName" >/dev/null 2>&1 || azd env new "$envName" --no-prompt || true
   fi
 }
 
-# 3) Resolve tenant id if set to auto
+# 4) Resolve tenant id if set to auto (after potential login above)
 RESOLVED_TENANT_ID=""
 if [[ "$TENANT_ID_MODE" == "auto" ]]; then
   RESOLVED_TENANT_ID=$(az account show --query tenantId -o tsv 2>/dev/null || true)
+  if [[ -z "$RESOLVED_TENANT_ID" ]]; then
+    RESOLVED_TENANT_ID=$(az account tenant list --query "[0].tenantId" -o tsv 2>/dev/null || true)
+  fi
 else
   RESOLVED_TENANT_ID="$TENANT_ID_MODE"
 fi
 
 AZD_UP_ARGS=()
-[[ -n "$ENV_NAME" ]] && AZD_UP_ARGS+=( -e "$ENV_NAME" )
-[[ -n "$LOCATION" ]] && AZD_UP_ARGS+=( -l "$LOCATION" )
 
 USE_DEV=0
 if [[ "$USE_DEVCONTAINER" == "true" ]]; then USE_DEV=1; fi
@@ -123,50 +130,84 @@ if [[ "$USE_DEVCONTAINER" == "auto" && -d .devcontainer && $HAS_DEVCONTAINER -eq
 if [[ $USE_DEV -eq 1 ]]; then
   echo "Building/starting dev container for workspace and running 'azd up' inside..."
   devcontainer up --workspace-folder . >/dev/null
-  # Create env if specified, then set env vars prior to up
+  # Create/select env if specified (no region pre-seeding; allow interactive prompts)
   if [[ -n "$ENV_NAME" ]]; then
-    devcontainer exec --workspace-folder . -- bash -lc "azd env list --output tsv | cut -f1 | grep -Fxq '$ENV_NAME' || azd env new -e '$ENV_NAME' -l '${LOCATION:-}' --no-prompt"
+    devcontainer exec --workspace-folder . -- azd env select "$ENV_NAME" >/dev/null 2>&1 || devcontainer exec --workspace-folder . -- azd env new "$ENV_NAME" --no-prompt || true
   fi
-  if [[ -n "$ENV_NAME" ]]; then ENV_FLAG=( -e "$ENV_NAME" ); else ENV_FLAG=(); fi
+  DEV_E_FLAG=() # we operate on active env inside the devcontainer
   # Pre-deploy env settings
-  devcontainer exec --workspace-folder . -- azd env set DEPLOYMENT_TARGET appservice "${ENV_FLAG[@]}" || true
-  devcontainer exec --workspace-folder . -- azd env set USE_CHAT_HISTORY_COSMOS true "${ENV_FLAG[@]}" || true
-  devcontainer exec --workspace-folder . -- azd env set AZURE_USE_AUTHENTICATION true "${ENV_FLAG[@]}" || true
+  devcontainer exec --workspace-folder . -- azd env set DEPLOYMENT_TARGET appservice "${DEV_E_FLAG[@]}" || true
+  devcontainer exec --workspace-folder . -- azd env set USE_CHAT_HISTORY_COSMOS true "${DEV_E_FLAG[@]}" || true
   if [[ -n "$RESOLVED_TENANT_ID" ]]; then
-    devcontainer exec --workspace-folder . -- azd env set AZURE_AUTH_TENANT_ID "$RESOLVED_TENANT_ID" "${ENV_FLAG[@]}" || true
+    devcontainer exec --workspace-folder . -- azd env set AZURE_USE_AUTHENTICATION true "${DEV_E_FLAG[@]}" || true
+    devcontainer exec --workspace-folder . -- azd env set AZURE_AUTH_TENANT_ID "$RESOLVED_TENANT_ID" "${DEV_E_FLAG[@]}" || true
+  fi
+  # Ensure subscription is set before 'azd up' to avoid selection prompt
+  if [[ -n "$SUBSCRIPTION" ]]; then
+    devcontainer exec --workspace-folder . -- az account set --subscription "$SUBSCRIPTION" || true
+    devcontainer exec --workspace-folder . -- azd env set AZURE_SUBSCRIPTION_ID "$SUBSCRIPTION" || true
+  fi
+  # Guard: ensure tenant id is present if auth is enabled, else disable auth
+  DEV_ENV_ALL=$(devcontainer exec --workspace-folder . -- azd env get-values 2>/dev/null | tr -d '\r' || true)
+  DEV_USE_AUTH=$(echo "$DEV_ENV_ALL" | sed -n 's/^AZURE_USE_AUTHENTICATION=//p')
+  DEV_TENANT=$(echo "$DEV_ENV_ALL" | sed -n 's/^AZURE_AUTH_TENANT_ID=//p')
+  if [[ "${DEV_USE_AUTH,,}" == "true" ]]; then
+    if [[ -z "$DEV_TENANT" ]]; then
+      DEV_TID="$RESOLVED_TENANT_ID"
+      if [[ -z "$DEV_TID" ]]; then DEV_TID=$(devcontainer exec --workspace-folder . -- az account show --query tenantId -o tsv 2>/dev/null | tr -d '\r' || true); fi
+      if [[ -z "$DEV_TID" ]]; then DEV_TID=$(devcontainer exec --workspace-folder . -- az account tenant list --query "[0].tenantId" -o tsv 2>/dev/null | tr -d '\r' || true); fi
+      if [[ -n "$DEV_TID" ]]; then
+        devcontainer exec --workspace-folder . -- azd env set AZURE_AUTH_TENANT_ID "$DEV_TID" || true
+      else
+        echo "(Warn) AZURE_USE_AUTHENTICATION is enabled but tenant id is unknown; disabling auth for this run."
+        devcontainer exec --workspace-folder . -- azd env set AZURE_USE_AUTHENTICATION "" || true
+      fi
+    fi
   fi
   # Run up
   devcontainer exec --workspace-folder . -- azd up "${AZD_UP_ARGS[@]}"
   # After up, set subscription if requested
   if [[ -n "$SUBSCRIPTION" ]]; then
-    CURRENT_ENV=$(devcontainer exec --workspace-folder . -- azd env list --output tsv 2>/dev/null | head -n1 | cut -f1 || true)
-    if [[ -z "$CURRENT_ENV" && -n "$ENV_NAME" ]]; then CURRENT_ENV="$ENV_NAME"; fi
-    if [[ -n "$CURRENT_ENV" ]]; then
-      devcontainer exec --workspace-folder . -- azd env set AZURE_SUBSCRIPTION_ID "$SUBSCRIPTION" -e "$CURRENT_ENV"
-    fi
+    devcontainer exec --workspace-folder . -- azd env set AZURE_SUBSCRIPTION_ID "$SUBSCRIPTION" || true
   fi
   # Extract RG from inside the container
   RG=$(devcontainer exec --workspace-folder . -- azd env get-values | sed -n 's/^AZURE_RESOURCE_GROUP=//p' | tr -d '\r')
 else
   echo "Running 'azd up' on host (this may be interactive) ..."
-  # Create env if specified, then set env vars prior to up
-  ensure_env_if_needed "$ENV_NAME" "$LOCATION"
-  if [[ -n "$ENV_NAME" ]]; then ENV_FLAG=( -e "$ENV_NAME" ); else ENV_FLAG=(); fi
-  azd env set DEPLOYMENT_TARGET appservice "${ENV_FLAG[@]}" || true
-  azd env set USE_CHAT_HISTORY_COSMOS true "${ENV_FLAG[@]}" || true
-  azd env set AZURE_USE_AUTHENTICATION true "${ENV_FLAG[@]}" || true
+  # Create env if specified (no region pre-seeding; allow interactive prompts)
+  ensure_env_if_needed "$ENV_NAME"
+  azd env set DEPLOYMENT_TARGET appservice || true
+  azd env set USE_CHAT_HISTORY_COSMOS true || true
   if [[ -n "$RESOLVED_TENANT_ID" ]]; then
-    azd env set AZURE_AUTH_TENANT_ID "$RESOLVED_TENANT_ID" "${ENV_FLAG[@]}" || true
+    azd env set AZURE_USE_AUTHENTICATION true || true
+    azd env set AZURE_AUTH_TENANT_ID "$RESOLVED_TENANT_ID" || true
+  fi
+  # Ensure subscription is set before 'azd up' to avoid selection prompt
+  if [[ -n "$SUBSCRIPTION" ]]; then
+    az account set --subscription "$SUBSCRIPTION" || true
+    azd env set AZURE_SUBSCRIPTION_ID "$SUBSCRIPTION" || true
+  fi
+  # Guard: ensure tenant id is present if auth is enabled, else disable auth
+  ENV_ALL=$(azd env get-values 2>/dev/null | tr -d '\r' || true)
+  USE_AUTH=$(echo "$ENV_ALL" | sed -n 's/^AZURE_USE_AUTHENTICATION=//p')
+  TID=$(echo "$ENV_ALL" | sed -n 's/^AZURE_AUTH_TENANT_ID=//p')
+  if [[ "${USE_AUTH,,}" == "true" ]]; then
+    if [[ -z "$TID" ]]; then
+      if [[ -z "$RESOLVED_TENANT_ID" ]]; then RESOLVED_TENANT_ID=$(az account show --query tenantId -o tsv 2>/dev/null || true); fi
+      if [[ -z "$RESOLVED_TENANT_ID" ]]; then RESOLVED_TENANT_ID=$(az account tenant list --query "[0].tenantId" -o tsv 2>/dev/null || true); fi
+      if [[ -n "$RESOLVED_TENANT_ID" ]]; then
+        azd env set AZURE_AUTH_TENANT_ID "$RESOLVED_TENANT_ID" || true
+      else
+        echo "(Warn) AZURE_USE_AUTHENTICATION is enabled but tenant id is unknown; disabling auth for this run."
+        azd env set AZURE_USE_AUTHENTICATION "" || true
+      fi
+    fi
   fi
   # Run up
   azd up "${AZD_UP_ARGS[@]}"
   # After up, set subscription (if provided) and re-deploy if needed
   if [[ -n "$SUBSCRIPTION" ]]; then
-    CURRENT_ENV=$(azd env list --output tsv --only-show-errors 2>/dev/null | head -n1 | cut -f1 || true)
-    if [[ -z "$CURRENT_ENV" && -n "$ENV_NAME" ]]; then CURRENT_ENV="$ENV_NAME"; fi
-    if [[ -n "$CURRENT_ENV" ]]; then
-      azd env set AZURE_SUBSCRIPTION_ID "$SUBSCRIPTION" -e "$CURRENT_ENV"
-    fi
+    azd env set AZURE_SUBSCRIPTION_ID "$SUBSCRIPTION" || true
   fi
   # Extract resource group name from azd env (host)
   RG=$(azd env get-values | sed -n 's/^AZURE_RESOURCE_GROUP=//p' | tr -d '\r')

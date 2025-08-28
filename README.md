@@ -54,11 +54,15 @@ Azure OpenAI   Azure AI Search   Azure Storage
 
 1️⃣ Open in Codespaces or VS Code Dev Container by clicking a badge above.
 
-2️⃣ Deploy the sample from a terminal in the dev container.
+2️⃣ Deploy the sample from a terminal in the dev container (regions are selected interactively).
 
 ```bash
-./deploy-sample-and-secure.sh --env azure-ai-search-demo --location westus2
- ```
+chmod +x *.sh; azd login --use-device-code
+```
+
+```bash
+./deploy-sample-and-secure.sh --env azure-ai-search-demo
+```
 
 3️⃣ Apply security hardening (includes Front Door + WAF by default)
 
@@ -100,7 +104,7 @@ What it does:
 ## 📖 Additional Resources
 
 - [Azure OpenAI Landing Zone Reference Architecture](https://techcommunity.microsoft.com/blog/azurearchitectureblog/azure-openai-landing-zone-reference-architecture/3882102)
-- [Azure AI Adoption Framework](https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/scenarios/ai/)
+- [Azure AI Adoption Framework](https://learn.microsoft.com/azure/cloud-adoption-framework/scenarios/ai/)
 
 ## 🤝 Contributing
 
