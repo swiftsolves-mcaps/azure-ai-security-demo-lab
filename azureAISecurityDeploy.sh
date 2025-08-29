@@ -215,17 +215,18 @@ if [ -f "$TEMPLATE_PATH" ]; then
             PROFILE_NAME="fd-${RESOURCE_GROUP}"
             ENDPOINT_NAME="ep-${RESOURCE_GROUP}"
             SKU="Standard_AzureFrontDoor"
-            WAF_MODE="Prevention"
+            # Optional: set WAF_POLICY_ID to an existing Microsoft.Cdn/cdnWebApplicationFirewallPolicies resource ID to attach
+            WAF_POLICY_ID=${WAF_POLICY_ID:-}
 
             echo "Setting httpsOnly=true on App Service '$APP_NAME'..."
             az webapp update -g "$RESOURCE_GROUP" -n "$APP_NAME" --set httpsOnly=true 1>/dev/null || true
 
-            DEPLOY_NAME="afd-waf-$(date +%Y%m%d%H%M%S)"
-            echo "Deploying Azure Front Door ($SKU) + WAF -> $APP_NAME ..."
+                        DEPLOY_NAME="afd-waf-$(date +%Y%m%d%H%M%S)"
+                        echo "Deploying Azure Front Door ($SKU)${WAF_POLICY_ID:+ + WAF} -> $APP_NAME ..."
             ENDPOINT_HOST=$(az deployment group create \
               -g "$RESOURCE_GROUP" -n "$DEPLOY_NAME" \
               --template-file "$TEMPLATE_PATH" \
-              --parameters profileName="$PROFILE_NAME" endpointName="$ENDPOINT_NAME" appServiceDefaultHostname="$APP_HOST" wafPolicyName="afd-waf-$RESOURCE_GROUP" sku="$SKU" wafMode="$WAF_MODE" \
+                            --parameters profileName="$PROFILE_NAME" endpointName="$ENDPOINT_NAME" appServiceDefaultHostname="$APP_HOST" sku="$SKU" wafPolicyResourceId="${WAF_POLICY_ID}" \
               --only-show-errors --query properties.outputs.endpointHostname.value -o tsv || true)
 
             if [ -n "$ENDPOINT_HOST" ]; then

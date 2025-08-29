@@ -20,8 +20,8 @@ param originName string = 'appservice-origin'
 @description('Default hostname of the App Service (e.g., myapp.azurewebsites.net). Used for host header and SNI checks.')
 param appServiceDefaultHostname string
 
-@description('Name for the WAF policy resource.')
-param wafPolicyName string = 'afd-waf-policy'
+@description('Optional existing WAF policy resource ID to attach (e.g., Microsoft.Cdn/cdnWebApplicationFirewallPolicies). Leave empty to skip WAF.')
+param wafPolicyResourceId string = ''
 
 @description('AFD SKU. Choose Standard_AzureFrontDoor or Premium_AzureFrontDoor.')
 @allowed([ 'Standard_AzureFrontDoor', 'Premium_AzureFrontDoor' ])
@@ -30,9 +30,7 @@ param sku string = 'Standard_AzureFrontDoor'
 @description('Route name for default catch-all routing.')
 param routeName string = 'default-route'
 
-@description('WAF mode: Prevention or Detection (log only).')
-@allowed([ 'Prevention', 'Detection' ])
-param wafMode string = 'Prevention'
+// WAF mode handled by the referenced policy; no local setting
 
 @description('Whether to automatically redirect HTTP to HTTPS.')
 param enableHttpToHttpsRedirect bool = true
@@ -116,37 +114,17 @@ resource route 'Microsoft.Cdn/profiles/afdEndpoints/routes@2024-09-01' = {
   dependsOn: [ origin ]
 }
 
-// WAF Policy for AFD Standard/Premium (CDN WAF)
-resource cdnWaf 'Microsoft.Cdn/cdnWebApplicationFirewallPolicies@2024-09-01' = {
-  name: wafPolicyName
-  location: 'Global'
-  sku: {
-    name: sku
-  }
-  properties: {
-    policySettings: {
-      enabledState: wafMode == 'Prevention' ? 'Enabled' : 'Enabled' // mode is represented by rules' actions; keep policy enabled
-    }
-    managedRules: {
-      managedRuleSets: [
-        {
-          ruleSetType: 'DefaultRuleSet'
-          ruleSetVersion: '2.1'
-        }
-      ]
-    }
-  }
-}
+// No WAF policy created in this template to avoid API retirement issues.
 
 // Security Policy to attach WAF to the endpoint domain
-resource securityPolicy 'Microsoft.Cdn/profiles/securityPolicies@2024-09-01' = {
+resource securityPolicy 'Microsoft.Cdn/profiles/securityPolicies@2024-09-01' = if (wafPolicyResourceId != '') {
   name: 'default-security-policy'
   parent: afdProfile
   properties: {
     parameters: {
       type: 'WebApplicationFirewall'
       wafPolicy: {
-        id: cdnWaf.id
+  id: wafPolicyResourceId
       }
       associations: [
         {
