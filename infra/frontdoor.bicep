@@ -16,15 +16,6 @@ param originGroupName string = 'app-origin-group'
 @description('Origin name (logical).')
 param originName string = 'appservice-origin'
 
-@description('Optional APIM gateway hostname (e.g., myapim.azure-api.net). When provided, adds an APIM origin and a /api/* route to APIM.')
-param apimHostname string = ''
-@description('APIM origin group name (logical).')
-param apimOriginGroupName string = 'apim-origin-group'
-@description('APIM origin name (logical).')
-param apimOriginName string = 'apim-origin'
-@description('Route name for API path routing.')
-param apiRouteName string = 'api-route'
-
 
 @description('Default hostname of the App Service (e.g., myapp.azurewebsites.net). Used for host header and SNI checks.')
 param appServiceDefaultHostname string
@@ -105,41 +96,6 @@ resource origin 'Microsoft.Cdn/profiles/originGroups/origins@2024-09-01' = {
   }
 }
 
-// Optional APIM origin group and origin
-resource apimOriginGroup 'Microsoft.Cdn/profiles/originGroups@2024-09-01' = if (apimHostname != '') {
-  name: apimOriginGroupName
-  parent: afdProfile
-  properties: {
-    healthProbeSettings: {
-      probePath: '/'
-      probeProtocol: 'Https'
-      probeRequestType: 'HEAD'
-      probeIntervalInSeconds: 60
-    }
-    loadBalancingSettings: {
-      sampleSize: 4
-      successfulSamplesRequired: 3
-      additionalLatencyInMilliseconds: 0
-    }
-    sessionAffinityState: 'Disabled'
-  }
-}
-
-resource apimOriginRes 'Microsoft.Cdn/profiles/originGroups/origins@2024-09-01' = if (apimHostname != '') {
-  name: apimOriginName
-  parent: apimOriginGroup
-  properties: {
-    hostName: apimHostname
-    originHostHeader: apimHostname
-    httpsPort: 443
-    httpPort: 80
-    priority: 1
-    weight: 1000
-    enabledState: 'Enabled'
-    enforceCertificateNameCheck: true
-  }
-}
-
 // Route: /* -> origin group, linked to default endpoint domain
 resource route 'Microsoft.Cdn/profiles/afdEndpoints/routes@2024-09-01' = {
   name: routeName
@@ -156,24 +112,6 @@ resource route 'Microsoft.Cdn/profiles/afdEndpoints/routes@2024-09-01' = {
     enabledState: 'Enabled'
   }
   dependsOn: [ origin ]
-}
-
-// Route: /api/* -> APIM origin group (if provided)
-resource apiRoute 'Microsoft.Cdn/profiles/afdEndpoints/routes@2024-09-01' = if (apimHostname != '') {
-  name: apiRouteName
-  parent: afdEndpoint
-  properties: {
-    originGroup: {
-      id: apimOriginGroup.id
-    }
-    httpsRedirect: enableHttpToHttpsRedirect ? 'Enabled' : 'Disabled'
-    linkToDefaultDomain: 'Enabled'
-    patternsToMatch: [ '/api/*' ]
-    forwardingProtocol: forwardingProtocol
-    supportedProtocols: [ 'Http', 'Https' ]
-    enabledState: 'Enabled'
-  }
-  dependsOn: [ apimOriginRes ]
 }
 
 // No WAF policy created in this template to avoid API retirement issues.
