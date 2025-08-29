@@ -87,7 +87,7 @@ chmod +x *.sh; ./deploy-sample-and-secure.sh --env azure-ai-search-demo
 Run the cleanup script from this repo:
 
 ```bash
-./cleanup.sh <RESOURCE_GROUP_NAME>
+./cleanup.sh rg-azure-ai-search-demo
 ```
 
 What it does:
