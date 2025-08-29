@@ -116,24 +116,21 @@ resource route 'Microsoft.Cdn/profiles/afdEndpoints/routes@2024-09-01' = {
   dependsOn: [ origin ]
 }
 
-// WAF Policy (Network AFD WAF)
-resource waf 'Microsoft.Network/frontdoorWebApplicationFirewallPolicies@2024-02-01' = {
+// WAF Policy for AFD Standard/Premium (CDN WAF)
+resource cdnWaf 'Microsoft.Cdn/cdnWebApplicationFirewallPolicies@2024-09-01' = {
   name: wafPolicyName
   location: 'Global'
   sku: {
-  // For AFD Standard/Premium, WAF policy SKU must be Classic_AzureFrontDoor
-  name: 'Classic_AzureFrontDoor'
+    name: sku
   }
   properties: {
     policySettings: {
-      mode: wafMode
-      requestBodyCheck: 'Enabled'
+      enabledState: wafMode == 'Prevention' ? 'Enabled' : 'Enabled' // mode is represented by rules' actions; keep policy enabled
     }
     managedRules: {
       managedRuleSets: [
         {
-      // AFD WAF default managed rule set (OWASP)
-      ruleSetType: 'DefaultRuleSet'
+          ruleSetType: 'DefaultRuleSet'
           ruleSetVersion: '2.1'
         }
       ]
@@ -149,7 +146,7 @@ resource securityPolicy 'Microsoft.Cdn/profiles/securityPolicies@2024-09-01' = {
     parameters: {
       type: 'WebApplicationFirewall'
       wafPolicy: {
-        id: waf.id
+        id: cdnWaf.id
       }
       associations: [
         {
