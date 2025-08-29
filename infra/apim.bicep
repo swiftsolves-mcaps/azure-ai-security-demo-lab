@@ -107,8 +107,10 @@ resource diagSettings 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview'
   properties: {
     workspaceId: logAnalyticsWorkspaceId
     logs: [
-      {
-        category: 'GatewayLogs'
+      for c in [
+        'GatewayLogs', 'WebSocketLogs', 'RequestResponseBodies', 'TenantLogs', 'AllMetrics'
+      ]: {
+        category: c
         enabled: true
         retentionPolicy: {
           days: 0
@@ -146,8 +148,7 @@ resource apiRag 'Microsoft.ApiManagement/service/apis@2024-05-01' = {
   parent: apim
   properties: {
     displayName: 'RAG API'
-  // Align with Front Door route /api/* -> APIM
-  path: 'api'
+    path: 'rag-api'
     protocols: [ 'https' ]
     serviceUrl: serviceUrlApp
   }
@@ -171,13 +172,6 @@ resource apiRagOpGet 'Microsoft.ApiManagement/service/apis/operations@2024-05-01
     displayName: 'Wildcard GET'
     method: 'GET'
     urlTemplate: '/{*path}'
-    templateParameters: [
-      {
-        name: 'path'
-        type: 'string'
-        required: true
-      }
-    ]
   }
 }
 
@@ -188,13 +182,6 @@ resource apiRagOpPost 'Microsoft.ApiManagement/service/apis/operations@2024-05-0
     displayName: 'Wildcard POST'
     method: 'POST'
     urlTemplate: '/{*path}'
-    templateParameters: [
-      {
-        name: 'path'
-        type: 'string'
-        required: true
-      }
-    ]
   }
 }
 
@@ -224,7 +211,7 @@ resource apiGenAIPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-05-0
   parent: apiGenAI
   properties: {
     format: 'rawxml'
-  value: '<policies>\n  <inbound>\n    <base />\n    <rewrite-uri template="@(context.Request.OriginalUrl.Path.Substring(context.Api.Path.Length))" />\n    <set-backend-service backend-id="openai-backend" />\n  </inbound>\n  <backend>\n    <base />\n  </backend>\n  <outbound>\n    <base />\n  </outbound>\n  <on-error>\n    <base />\n  </on-error>\n</policies>'
+  value: '<policies>\n  <inbound>\n    <base />\n    <rewrite-uri template="/@(context.Request.OriginalUrl.Path.Substring(context.Api.Path.Length))" />\n    <set-backend-service backend-id="openai-backend" />\n  </inbound>\n  <backend>\n    <base />\n  </backend>\n  <outbound>\n    <base />\n  </outbound>\n  <on-error>\n    <base />\n  </on-error>\n</policies>'
   }
 }
 
@@ -236,13 +223,6 @@ resource apiGenAIOpGet 'Microsoft.ApiManagement/service/apis/operations@2024-05-
     displayName: 'Wildcard GET'
     method: 'GET'
     urlTemplate: '/{*path}'
-    templateParameters: [
-      {
-        name: 'path'
-        type: 'string'
-        required: true
-      }
-    ]
   }
 }
 
@@ -253,13 +233,6 @@ resource apiGenAIOpPost 'Microsoft.ApiManagement/service/apis/operations@2024-05
     displayName: 'Wildcard POST'
     method: 'POST'
     urlTemplate: '/{*path}'
-    templateParameters: [
-      {
-        name: 'path'
-        type: 'string'
-        required: true
-      }
-    ]
   }
 }
 

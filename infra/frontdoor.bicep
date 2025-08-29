@@ -29,9 +29,6 @@ param apiRouteName string = 'api-route'
 @description('Default hostname of the App Service (e.g., myapp.azurewebsites.net). Used for host header and SNI checks.')
 param appServiceDefaultHostname string
 
-@description('Optional override for the Host header sent to the App Service origin. Set this to your custom domain (e.g., www.contoso.com) AFTER binding it on the App Service to avoid redirects to azurewebsites.net. Leave empty to use the App Service default hostname.')
-param originHostHeaderOverride string = ''
-
 @description('Optional existing WAF policy resource ID to attach (e.g., Microsoft.Cdn/cdnWebApplicationFirewallPolicies). Leave empty to skip WAF.')
 param wafPolicyResourceId string = ''
 
@@ -41,7 +38,6 @@ param sku string = 'Standard_AzureFrontDoor'
 
 @description('Route name for default catch-all routing.')
 param routeName string = 'default-route'
-
 
 // WAF mode handled by the referenced policy; no local setting
 
@@ -71,7 +67,6 @@ resource afdEndpoint 'Microsoft.Cdn/profiles/afdEndpoints@2024-09-01' = {
   }
 }
 
-
 // Origin Group
 resource originGroup 'Microsoft.Cdn/profiles/originGroups@2024-09-01' = {
   name: originGroupName
@@ -100,11 +95,7 @@ resource origin 'Microsoft.Cdn/profiles/originGroups/origins@2024-09-01' = {
   properties: {
   // For AFD Standard/Premium, specify the origin by hostname. Do not use 'azureOrigin' here.
   hostName: appServiceDefaultHostname
-  // Use the App Service hostname so the site routes correctly and avoids 404
-  // Note: The app may generate absolute URLs to azurewebsites.net if it ignores X-Forwarded-Host
-  // If a custom domain is bound on the App Service, set 'originHostHeaderOverride' to that domain
-  // to prevent canonical redirects to azurewebsites.net while keeping TLS SNI on the App Service hostname.
-  originHostHeader: originHostHeaderOverride == '' ? appServiceDefaultHostname : originHostHeaderOverride
+  originHostHeader: appServiceDefaultHostname
     httpsPort: 443
     httpPort: 80
     priority: 1

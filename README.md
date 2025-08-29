@@ -54,7 +54,7 @@ Azure OpenAI   Azure AI Search   Azure Storage
 
 1️⃣ Open in Codespaces or VS Code Dev Container by clicking a badge above.
 
-2️⃣ Deploy the sample from a terminal in the dev container.
+2️⃣ Deploy the sample from a terminal in the dev container (regions are selected interactively).
 
 ```bash
 chmod +x *.sh; ./deploy-sample-and-secure.sh --env azure-ai-search-demo
