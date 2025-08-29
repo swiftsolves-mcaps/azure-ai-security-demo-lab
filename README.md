@@ -44,7 +44,7 @@ Azure OpenAI   Azure AI Search   Azure Storage
 |---|---|---|
 | Azure Front Door + WAF | Global edge entry (anycast), TLS offload, path-based routing; WAF managed rules (OWASP), optional bot/rate limits | Protects AI app ingress and mitigates prompt injection/abuse at the edge |
 | Defender for Storage | On-upload malware scanning, sensitive data discovery (PII/PCI/PHI), anomaly detection; alerts in Defender for Cloud | Safeguards training data, embeddings, and user uploads |
-| Defender for AI | Model- and prompt-aware threat detection for Azure OpenAI; monitors misuse, exfil attempts, and known attack patterns | Detects abuse/attacks specific to AI workloads |
+| Defender for AI | Model, and prompt-aware threat detection for Azure OpenAI; monitors misuse, exfil attempts, and known attack patterns | Detects abuse/attacks specific to AI workloads |
 | Defender for App Service | Runtime threat detection for App Service: suspicious requests, process anomalies, brute-force and exploitation attempts | Monitors the AI app runtime and API surface |
 | Defender for Cosmos DB | Threat detection: SQL injection, anomalous access, data exfiltration patterns on databases/containers | Protects chat history and semantic cache |
 
@@ -75,8 +75,9 @@ chmod +x *.sh; ./deploy-sample-and-secure.sh --env azure-ai-search-demo
 ## 📝 To-Do List
  
 - [ ] Create a real architecture diagram that's not ASCII.
+- - [ ] Add APIM with [Defender for APIs](https://learn.microsoft.com/azure/defender-for-cloud/defender-for-apis-introduction)
 - [ ] Integrate [Data-Aware Threat Protection and Security Posture](https://learn.microsoft.com/azure/defender-for-cloud/concept-data-aware-security) features
-- [ ] Add APIM with [Defender for APIs](https://learn.microsoft.com/azure/defender-for-cloud/defender-for-apis-introduction)
+- [ ] Add Azure Front Door + WAF
 - [ ] Build SQL data source and enable [Defender for SQL](https://learn.microsoft.com/azure/defender-for-cloud/defender-for-sql-introduction)
 - [ ] Deploy Microsoft Purview for Data Classification, and DLP
 - [ ] Integrate Azure AI Content Safety in [application code](https://learn.microsoft.com/azure/ai-services/content-safety/overview)
@@ -87,7 +88,7 @@ chmod +x *.sh; ./deploy-sample-and-secure.sh --env azure-ai-search-demo
 Run the cleanup script from this repo:
 
 ```bash
-./cleanup.sh <RESOURCE_GROUP_NAME>
+./cleanup.sh azure-ai-search-demo
 ```
 
 What it does:
@@ -100,6 +101,7 @@ What it does:
 
 - [Azure OpenAI Landing Zone Reference Architecture](https://techcommunity.microsoft.com/blog/azurearchitectureblog/azure-openai-landing-zone-reference-architecture/3882102)
 - [Azure AI Adoption Framework](https://learn.microsoft.com/azure/cloud-adoption-framework/scenarios/ai/)
+- [Azure Security Collation](https://github.com/matthansen0/azure-security-collation)
 
 ## 🤝 Contributing
 
