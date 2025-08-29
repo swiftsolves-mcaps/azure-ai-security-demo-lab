@@ -193,6 +193,80 @@ echo "- Defender plan (Cosmos DBs) at subscription: $COSMOS_MARK $COSMOS_SUB_STA
 echo
 echo "All specified security features have been attempted for resources in $RESOURCE_GROUP."
 
+# --- Optional: Patch the app (if azd workspace detected) to honor Front Door forwarded headers ---
+patch_app_forwarded_headers() {
+    # Requires that detect_rg sourced .azd_state.env earlier, setting AZD_WORKDIR/AZD_ENV when present
+    if [ -z "${AZD_WORKDIR:-}" ] || [ ! -d "$AZD_WORKDIR" ]; then
+        echo "No azd workspace detected (.azd_state.env). Skipping app patch."
+        return 0
+    fi
+    PYBIN=""
+    if command -v python3 >/dev/null 2>&1; then PYBIN="python3"; elif command -v python >/dev/null 2>&1; then PYBIN="python"; fi
+    if [ -z "$PYBIN" ]; then
+        echo "Python not found on PATH; cannot patch app for forwarded headers."
+        return 0
+    fi
+    # Prefer classic sample path; otherwise search for a Quart app.py
+    APP_FILE="$AZD_WORKDIR/app/backend/app.py"
+    if [ ! -f "$APP_FILE" ]; then
+        APP_FILE=$(grep -RIl --include "*.py" "from quart import Quart" "$AZD_WORKDIR" | head -n1 || true)
+    fi
+    if [ -z "$APP_FILE" ] || [ ! -f "$APP_FILE" ]; then
+        echo "Quart app file not found under $AZD_WORKDIR; skipping app patch."
+        return 0
+    fi
+    if grep -q "class ForwardedHostMiddleware" "$APP_FILE"; then
+        echo "App already contains ForwardedHostMiddleware; skipping injection."
+    else
+        echo "Injecting ForwardedHostMiddleware into $APP_FILE ..."
+        "$PYBIN" - "$APP_FILE" << 'PY'
+import sys, io
+path=sys.argv[1]
+with open(path,'r',encoding='utf-8') as f:
+    s=f.read()
+if 'class ForwardedHostMiddleware' not in s:
+    s = s + "\n\nclass ForwardedHostMiddleware:\n    def __init__(self, app):\n        self.app = app\n    async def __call__(self, scope, receive, send):\n        if scope.get('type') == 'http':\n            hdrs = {k.decode('latin1').lower(): v.decode('latin1') for k, v in scope.get('headers', [])}\n            xf_proto = hdrs.get('x-forwarded-proto')\n            xf_host = hdrs.get('x-forwarded-host')\n            if xf_proto: scope['scheme'] = xf_proto\n            if xf_host:\n                host = xf_host.split(':')[0]\n                port = 443 if (xf_proto == 'https') else 80\n                scope['server'] = (host, port)\n                new_headers = []\n                for k, v in scope.get('headers', []):\n                    if k.lower() == b'host':\n                        new_headers.append((b'host', xf_host.encode('latin1')))
+                    else:\n                        new_headers.append((k, v))\n                scope['headers'] = new_headers\n        await self.app(scope, receive, send)\n"
+with open(path,'w',encoding='utf-8') as f:
+    f.write(s)
+print('OK')
+PY
+    fi
+    if grep -q "ForwardedHostMiddleware" "$APP_FILE"; then
+        echo "Wiring ForwardedHostMiddleware into Quart app factory..."
+        "$PYBIN" - "$APP_FILE" << 'PY'
+import sys
+path=sys.argv[1]
+with open(path,'r',encoding='utf-8') as f:
+    s=f.read()
+changed=False
+if 'def create_app()' in s and 'app = Quart(__name__)' in s:
+    parts=s.split('def create_app():')
+    head=parts[0]
+    rest='def create_app():'+parts[1]
+    lines=rest.splitlines()
+    out=[]; inserted=False
+    for l in lines:
+        out.append(l)
+        if (not inserted) and 'app = Quart(__name__)' in l:
+            out.append('    app.asgi_app = ForwardedHostMiddleware(app.asgi_app)  # honor X-Forwarded-* from Front Door')
+            inserted=True; changed=True
+    s=head+'\n'.join(out)
+elif 'app = Quart(__name__)' in s and 'ForwardedHostMiddleware' in s and 'app.asgi_app' not in s:
+    s=s.replace('app = Quart(__name__)', "app = Quart(__name__)\napp.asgi_app = ForwardedHostMiddleware(app.asgi_app)  # honor X-Forwarded-* from Front Door")
+    changed=True
+if changed:
+    with open(path,'w',encoding='utf-8') as f: f.write(s)
+print('OK')
+PY
+    fi
+    # Deploy updated code via azd (best-effort)
+    if [ -n "${AZD_ENV:-}" ]; then
+        echo "Redeploying app via azd (env: $AZD_ENV) to apply forwarded header fix ..."
+        (cd "$AZD_WORKDIR" && azd deploy -e "$AZD_ENV" --no-prompt || true)
+    fi
+}
+
 # Azure API Management (v2) minimal setup with diagnostics, plus Front Door routing to APIM for /api and optional OpenAI proxy at /genai
 APIM_TEMPLATE_PATH="$SCRIPT_DIR/infra/apim.bicep"
 if [ -f "$APIM_TEMPLATE_PATH" ]; then
@@ -260,6 +334,9 @@ else
     echo "APIM template not found at $APIM_TEMPLATE_PATH. Skipping APIM setup."
 fi
 
+# Attempt to patch app to honor forwarded headers (pre Front Door) if possible
+patch_app_forwarded_headers || true
+
 # Azure Front Door + WAF (Standard) in front of App Service (default behavior)
 TEMPLATE_PATH="$SCRIPT_DIR/infra/frontdoor.bicep"
 if [ -f "$TEMPLATE_PATH" ]; then
@@ -298,6 +375,9 @@ if [ -f "$TEMPLATE_PATH" ]; then
 
             if [ -n "$ENDPOINT_HOST" ]; then
                 echo "Front Door deployed. Default endpoint: https://$ENDPOINT_HOST"
+                                echo "Setting ALLOWED_ORIGIN to https://$ENDPOINT_HOST on App Service '$APP_NAME'..."
+                                az webapp config appsettings set -g "$RESOURCE_GROUP" -n "$APP_NAME" \
+                                    --settings ALLOWED_ORIGIN="https://$ENDPOINT_HOST" 1>/dev/null || true
             else
                 echo "Front Door deployment completed, but endpoint hostname was not retrieved."
             fi
