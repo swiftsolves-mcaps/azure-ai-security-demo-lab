@@ -96,7 +96,7 @@ else
     echo "Front Door removal complete."
 fi
 
-echo "Cleanup complete!"
+echo "Core cleanup complete. Proceeding with optional identity cleanup..."
 
 # Optional: Revoke Entra ID (Microsoft Entra) app client secrets used for App Service auth
 # This will NOT delete the app registrations; it only removes existing password credentials (client secrets).
@@ -130,20 +130,25 @@ detect_app_ids() {
         fi
     fi
     # 2) From App Service auth settings in this resource group
-    local apps
-    apps=$(az webapp list -g "$RESOURCE_GROUP" --query "[?contains(kind, 'function')==\`false\`].name" -o tsv | tr -d '\r' || true)
-    if [ -n "$apps" ]; then
-        while IFS= read -r app; do
-            [ -z "$app" ] && continue
-            local cid
-            cid=$(az webapp auth show -g "$RESOURCE_GROUP" -n "$app" --query "identityProviders.azureActiveDirectory.registration.clientId" -o tsv 2>/dev/null | tr -d '\r' || true)
-            if echo "$cid" | grep -Eq '^[0-9a-fA-F-]{36}$'; then
-                # de-dup
-                if ! echo "$ids" | grep -qw "$cid"; then
-                    ids="$ids $cid"
+    # Only enumerate web apps if the resource group still exists
+    local rg_exists
+    rg_exists=$(az group exists -n "$RESOURCE_GROUP" -o tsv 2>/dev/null || echo false)
+    if [ "$rg_exists" = "true" ]; then
+        local apps
+        apps=$(az webapp list -g "$RESOURCE_GROUP" --query "[?contains(kind, 'function')==\`false\`].name" -o tsv 2>/dev/null | tr -d '\r' || true)
+        if [ -n "$apps" ]; then
+            while IFS= read -r app; do
+                [ -z "$app" ] && continue
+                local cid
+                cid=$(az webapp auth show -g "$RESOURCE_GROUP" -n "$app" --query "identityProviders.azureActiveDirectory.registration.clientId" -o tsv 2>/dev/null | tr -d '\r' || true)
+                if echo "$cid" | grep -Eq '^[0-9a-fA-F-]{36}$'; then
+                    # de-dup
+                    if ! echo "$ids" | grep -qw "$cid"; then
+                        ids="$ids $cid"
+                    fi
                 fi
-            fi
-        done <<< "$apps"
+            done <<< "$apps"
+        fi
     fi
     echo "$ids" | tr ' ' '\n' | sed '/^$/d' | sort -u
 }
@@ -176,3 +181,5 @@ if [ -n "$APP_IDS" ]; then
 else
     echo "No candidate Entra app registrations detected for client secret cleanup."
 fi
+
+echo "Cleanup complete!"
