@@ -193,6 +193,73 @@ echo "- Defender plan (Cosmos DBs) at subscription: $COSMOS_MARK $COSMOS_SUB_STA
 echo
 echo "All specified security features have been attempted for resources in $RESOURCE_GROUP."
 
+# Azure API Management (v2) minimal setup with diagnostics, plus Front Door routing to APIM for /api and optional OpenAI proxy at /genai
+APIM_TEMPLATE_PATH="$SCRIPT_DIR/infra/apim.bicep"
+if [ -f "$APIM_TEMPLATE_PATH" ]; then
+    echo "Configuring API Management (v2) with minimal routing..."
+    RG_LOCATION=$(az group show -n "$RESOURCE_GROUP" --query location -o tsv)
+
+    # Resolve App Service API host (non-function app)
+    APP_NAMES_APIM=$(az webapp list -g "$RESOURCE_GROUP" --query "[?contains(kind, 'function')==\`false\`].name" -o tsv | tr -d '\r' || true)
+    APP_COUNT_APIM=$(echo "$APP_NAMES_APIM" | sed '/^$/d' | wc -l | tr -d ' ')
+    APP_HOST_APIM=""
+    if [ "$APP_COUNT_APIM" -eq 1 ]; then
+        APP_NAME_APIM="$APP_NAMES_APIM"
+        APP_HOST_APIM=$(az webapp show -g "$RESOURCE_GROUP" -n "$APP_NAME_APIM" --query defaultHostName -o tsv || true)
+    fi
+
+    # Find Azure OpenAI endpoint (optional)
+    OPENAI_ACCOUNT=$(az resource list -g "$RESOURCE_GROUP" --resource-type "Microsoft.CognitiveServices/accounts" --query "[?kind=='OpenAI'].name | [0]" -o tsv || true)
+    OPENAI_ENDPOINT=""
+    if [ -n "$OPENAI_ACCOUNT" ]; then
+        if az cognitiveservices account show -g "$RESOURCE_GROUP" -n "$OPENAI_ACCOUNT" >/dev/null 2>&1; then
+            OPENAI_ENDPOINT=$(az cognitiveservices account show -g "$RESOURCE_GROUP" -n "$OPENAI_ACCOUNT" --query properties.endpoint -o tsv || true)
+        else
+            OPENAI_ENDPOINT=$(az resource show -g "$RESOURCE_GROUP" --resource-type Microsoft.CognitiveServices/accounts -n "$OPENAI_ACCOUNT" --query properties.endpoint -o tsv || true)
+        fi
+    fi
+
+    # Application Insights connection string (optional)
+    APPINSIGHTS_CONN=$(az resource list -g "$RESOURCE_GROUP" --resource-type "Microsoft.Insights/components" --query "[0].properties.connectionString" -o tsv 2>/dev/null || true)
+    if [ -z "$APPINSIGHTS_CONN" ]; then
+        APPINSIGHTS_CONN=$(az resource list -g "$RESOURCE_GROUP" --resource-type "Microsoft.Insights/components" --query "[0].properties.ConnectionString" -o tsv 2>/dev/null || true)
+    fi
+
+    # Log Analytics Workspace (from earlier)
+    LAW_ID="$LOG_ANALYTICS_WS_ID"
+
+    # Compute APIM name (letters/numbers/hyphen, start with a letter, <=50)
+    SAN_RG=$(echo "$RESOURCE_GROUP" | tr -cd '[:alnum:]-')
+    APIM_NAME="apim-${SAN_RG}"
+    # Trim to 50 chars
+    if [ ${#APIM_NAME} -gt 50 ]; then APIM_NAME="${APIM_NAME:0:50}"; fi
+
+    APIM_DEPLOY_NAME="apim-$(date +%Y%m%d%H%M%S)"
+    echo "Deploying APIM ($APIM_NAME) in $RG_LOCATION ..."
+    az deployment group create \
+      -g "$RESOURCE_GROUP" -n "$APIM_DEPLOY_NAME" \
+      --template-file "$APIM_TEMPLATE_PATH" \
+      --parameters apimName="$APIM_NAME" location="$RG_LOCATION" \
+                  appServiceHostname="$APP_HOST_APIM" \
+                  openAIEndpoint="$OPENAI_ENDPOINT" \
+                  appInsightsConnectionString="$APPINSIGHTS_CONN" \
+                  logAnalyticsWorkspaceId="$LAW_ID" \
+                  skuName="BasicV2" skuCapacity=1 \
+      --only-show-errors 1>/dev/null
+
+    APIM_HOSTNAME="${APIM_NAME}.azure-api.net"
+
+    # If OpenAI proxy exists and we have exactly one app, point the app to APIM /genai without code changes
+    if [ -n "$OPENAI_ENDPOINT" ] && [ -n "$APP_NAME_APIM" ] && [ -n "$APIM_HOSTNAME" ]; then
+        NEW_OPENAI_BASE="https://${APIM_HOSTNAME}/genai"
+        echo "Updating App Service '$APP_NAME_APIM' to use APIM for OpenAI: $NEW_OPENAI_BASE"
+        az webapp config appsettings set -g "$RESOURCE_GROUP" -n "$APP_NAME_APIM" \
+          --settings AZURE_OPENAI_ENDPOINT="$NEW_OPENAI_BASE" OPENAI_API_BASE="$NEW_OPENAI_BASE" 1>/dev/null || true
+    fi
+else
+    echo "APIM template not found at $APIM_TEMPLATE_PATH. Skipping APIM setup."
+fi
+
 # Azure Front Door + WAF (Standard) in front of App Service (default behavior)
 TEMPLATE_PATH="$SCRIPT_DIR/infra/frontdoor.bicep"
 if [ -f "$TEMPLATE_PATH" ]; then
@@ -226,7 +293,7 @@ if [ -f "$TEMPLATE_PATH" ]; then
             ENDPOINT_HOST=$(az deployment group create \
               -g "$RESOURCE_GROUP" -n "$DEPLOY_NAME" \
               --template-file "$TEMPLATE_PATH" \
-                            --parameters profileName="$PROFILE_NAME" endpointName="$ENDPOINT_NAME" appServiceDefaultHostname="$APP_HOST" sku="$SKU" wafPolicyResourceId="${WAF_POLICY_ID}" \
+                            --parameters profileName="$PROFILE_NAME" endpointName="$ENDPOINT_NAME" appServiceDefaultHostname="$APP_HOST" sku="$SKU" wafPolicyResourceId="${WAF_POLICY_ID}" apimHostname="${APIM_HOSTNAME:-}" \
               --only-show-errors --query properties.outputs.endpointHostname.value -o tsv || true)
 
             if [ -n "$ENDPOINT_HOST" ]; then
