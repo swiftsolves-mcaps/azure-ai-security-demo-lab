@@ -81,7 +81,7 @@ chmod +x *.sh; ./deploy-sample-and-secure.sh --env azure-ai-search-demo
 - [ ] Build SQL data source and enable [Defender for SQL](https://learn.microsoft.com/azure/defender-for-cloud/defender-for-sql-introduction)
 - [ ] Deploy Microsoft Purview for Data Classification, and DLP
 - [ ] Integrate Azure AI Content Safety in [application code](https://learn.microsoft.com/azure/ai-services/content-safety/overview)
-- [ ] Add [Data and AI security dashboard] (https://learn.microsoft.com/en-us/azure/defender-for-cloud/data-aware-security-dashboard-overview)
+- [ ] Add [Data and AI security dashboard](https://learn.microsoft.com/en-us/azure/defender-for-cloud/data-aware-security-dashboard-overview)
 - [ ] Add user guides for walking through verifying each aspect of the solution's security measures
 
 ## 🧹 Cleanup / Deletion
